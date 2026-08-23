@@ -62,7 +62,13 @@ async function start() {
     await sequelize.authenticate();
     console.log('Database connected');
 
-    await sequelize.sync({ alter: true });
+    if (config.nodeEnv === 'production') {
+      // Never auto-alter a production schema — run `npm run db:migrate` on deploys
+      await sequelize.sync();
+      console.warn('Production: schema synced (no alter). Run `npm run db:migrate` on schema changes.');
+    } else {
+      await sequelize.sync({ alter: true });
+    }
     console.log('Database synced');
 
     // Seed default fee configs
@@ -78,6 +84,10 @@ async function start() {
       console.log(`InstaCard API running on port ${config.port}`);
       console.log(`Health: http://localhost:${config.port}/api/health`);
     });
+
+    // Poll providers for transactions whose webhooks never arrived
+    const ReconciliationJob = require('./services/reconciliationJob');
+    ReconciliationJob.start();
   } catch (err) {
     console.error('Failed to start:', err);
     process.exit(1);
