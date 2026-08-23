@@ -1,7 +1,7 @@
 const axios = require('axios');
 const config = require('../config/config');
+const { cacheGet, cacheSet } = require('../utils/cache');
 
-const CACHE = {};
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
 class FXService {
@@ -11,19 +11,18 @@ class FXService {
   static async getRate(from, to) {
     if (from === to) return 1;
 
-    const cacheKey = `${from}_${to}`;
-    if (CACHE[cacheKey] && CACHE[cacheKey].expiry > Date.now()) {
-      return CACHE[cacheKey].rate;
-    }
+    const cacheKey = `fx:${from}_${to}`;
+    const cached = await cacheGet(cacheKey);
+    if (cached !== null) return cached;
 
     try {
       const response = await axios.get(`${config.fx.apiUrl}/${from}`, { timeout: 10000 });
       const rate = response.data.rates[to];
 
-      if (rate) {
-        CACHE[cacheKey] = { rate, expiry: Date.now() + CACHE_TTL };
-        return rate;
-      }
+    if (rate) {
+      await cacheSet(cacheKey, rate, CACHE_TTL);
+      return rate;
+    }
     } catch (err) {
       console.error('FX rate fetch failed:', err.message);
     }
@@ -69,10 +68,11 @@ class FXService {
   }
 
   /**
-   * Invalidate cache
+   * Invalidate in-memory cache (Redis entries expire via TTL)
    */
   static invalidateCache() {
-    Object.keys(CACHE).forEach((key) => delete CACHE[key]);
+    const { clearMemory } = require('../utils/cache');
+    clearMemory();
   }
 }
 

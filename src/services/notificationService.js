@@ -1,22 +1,49 @@
+const axios = require('axios');
 const config = require('../config/config');
 
 class NotificationService {
   /**
-   * Send SMS via Africa's Talking
+   * Send SMS via Africa's Talking REST API.
+   * Fails soft — money flow must never block on notifications.
    */
   static async sendSMS(phone, message) {
     if (!config.sms.apiKey || !config.sms.username) {
-      console.warn('SMS not configured, skipping:', message);
+      console.warn('[SMS] not configured, skipping:', message.slice(0, 60));
       return { sent: false, reason: 'not_configured' };
     }
 
-    // Africa's Talking SDK integration
-    // const AfricasTalking = require('africastalking');
-    // const at = AfricasTalking({ apiKey: config.sms.apiKey, username: config.sms.username });
-    // await at.SMS.send({ to: [phone], message, from: config.sms.senderId });
+    try {
+      const response = await axios.post(
+        `${config.sms.apiBase}/version1/messaging`,
+        {
+          username: config.sms.username,
+          to: [phone],
+          message,
+          ...(config.sms.senderId && config.sms.environment !== 'sandbox'
+            ? { from: config.sms.senderId }
+            : {}),
+          enqueue: true,
+        },
+        {
+          headers: {
+            apiKey: config.sms.apiKey,
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+          },
+          timeout: 15000,
+        }
+      );
 
-    console.log(`[SMS] To: ${phone} | Message: ${message}`);
-    return { sent: true, provider: 'africastalking' };
+      const recipient = response.data?.SMSMessageData?.Recipients?.[0];
+      const ok = recipient && !String(recipient.status).startsWith('Invalid');
+      if (!ok) {
+        console.warn('[SMS] provider rejected:', recipient?.status || JSON.stringify(response.data).slice(0, 120));
+      }
+      return { sent: !!ok, provider: 'africastalking', status: recipient?.status };
+    } catch (err) {
+      console.error('[SMS] send failed:', err.message);
+      return { sent: false, reason: err.message };
+    }
   }
 
   /**
@@ -27,20 +54,30 @@ class NotificationService {
   }
 
   /**
-   * Send transaction notification
+   * Transaction alert — best effort, never throws
    */
   static async sendTransactionAlert(userId, type, amount, currency, balance) {
-    // In production, look up user's phone and send SMS
-    // For now, log it
-    console.log(`[NOTIFICATION] User ${userId}: ${type} ${amount} ${currency} | Balance: ${balance}`);
-    return { sent: true };
+    try {
+      const { User } = require('../models');
+      const user = await User.findByPk(userId);
+      if (!user?.phone) return { sent: false, reason: 'no_phone' };
+
+      return await this.sendSMS(
+        user.phone,
+        `InstaCard: ${String(type).replace(/_/g, ' ')} of ${amount} ${currency} confirmed. New balance: ${balance} ${currency}.`
+      );
+    } catch (err) {
+      console.error('[SMS] transaction alert failed:', err.message);
+      return { sent: false, reason: err.message };
+    }
   }
 
   /**
-   * Generate OTP code
+   * Generate OTP code (cryptographically random)
    */
   static generateOTP() {
-    return Math.floor(100000 + Math.random() * 900000).toString();
+    const crypto = require('crypto');
+    return String(100000 + (crypto.randomInt(0, 900000)));
   }
 }
 

@@ -31,9 +31,11 @@ module.exports = {
   },
   fx: { apiUrl: process.env.FX_API_URL || 'https://api.exchangerate-api.com/v4/latest/USD' },
   sms: {
+    apiBase: process.env.AT_API_BASE || 'https://api.africastalking.com',
     apiKey: process.env.AT_API_KEY || '',
     username: process.env.AT_USERNAME || '',
     senderId: process.env.AT_SENDER_ID || 'InstaCard',
+    environment: process.env.AT_ENVIRONMENT || 'production',
   },
   webhookSecret: process.env.WEBHOOK_SECRET || 'dev-webhook-secret',
 };
