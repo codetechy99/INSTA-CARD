@@ -316,4 +316,39 @@ router.post('/fx/quote', protect, async (req, res) => {
   }
 });
 
+// POST /api/wallet/fx/convert — execute a currency conversion
+router.post('/fx/convert', protect, requirePin, async (req, res) => {
+  try {
+    const { amount, fromCurrency, toCurrency } = req.body;
+    if (!amount || !fromCurrency || !toCurrency) {
+      return res.status(400).json({ error: 'amount, fromCurrency, and toCurrency required' });
+    }
+    if (fromCurrency === toCurrency) {
+      return res.status(400).json({ error: 'Cannot convert to the same currency' });
+    }
+
+    const amt = parseFloat(amount);
+    if (amt <= 0) return res.status(400).json({ error: 'Amount must be positive' });
+
+    // Quote + fee up front so the user is charged exactly what a quote promised
+    const feeResult = await FeeEngine.calculate('fx', amt, fromCurrency);
+
+    const result = await WalletEngine.convert(req.userId, amt, {
+      from: fromCurrency,
+      to: toCurrency,
+      fee: feeResult.fee,
+      tax: feeResult.tax,
+      ipAddress: req.ip,
+    });
+
+    res.json({ status: 'success', message: 'Conversion completed', ...result });
+  } catch (err) {
+    console.error('FX convert error:', err);
+    const msg = /Insufficient balance|not active|wallet/i.test(err.message)
+      ? err.message
+      : 'Conversion failed';
+    res.status(err.message.includes('Insufficient') ? 400 : 500).json({ error: msg });
+  }
+});
+
 module.exports = router;
